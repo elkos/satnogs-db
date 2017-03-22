@@ -11,13 +11,18 @@ from django.http import HttpResponseNotFound, HttpResponseServerError, HttpRespo
 from django.conf import settings
 from django.contrib.sites.shortcuts import get_current_site
 from django.template.loader import render_to_string
+from django.views.decorators.cache import cache_page
+from django.db.models import Count
 
-from db.base.models import Mode, Transmitter, Satellite, Suggestion
+from db.base.models import Mode, Transmitter, Satellite, Suggestion, DemodData
 from db.base.forms import SuggestionForm
+from db.base.helpers import get_apikey
+
 
 logger = logging.getLogger('db')
 
 
+@cache_page(settings.CACHE_TTL)
 def home(request):
     """View to render home page."""
     satellites = Satellite.objects.all()
@@ -128,9 +133,19 @@ def faq(request):
 
 def stats(request):
     """View to render stats page."""
-    return render(request, 'base/stats.html')
+    satellites = Satellite.objects \
+                          .values('name', 'norad_cat_id') \
+                          .annotate(count=Count('telemetry_data')) \
+                          .order_by('-count')
+    observers = DemodData.objects \
+                         .values('observer') \
+                         .annotate(count=Count('observer')) \
+                         .order_by('-count')
+    return render(request, 'base/stats.html', {'satellites': satellites,
+                                               'observers': observers})
 
 
+@cache_page(settings.CACHE_TTL)
 def statistics(request):
     """View to create statistics endpoint."""
     satellites = Satellite.objects.all()
@@ -225,3 +240,10 @@ def statistics(request):
         'band_data': band_data_sorted
     }
     return JsonResponse(statistics, safe=False)
+
+
+@login_required
+def users_edit(request):
+    """View to render user settings page."""
+    token = get_apikey(request.user)
+    return render(request, 'base/users_edit.html', {'token': token})

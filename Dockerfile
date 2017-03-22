@@ -5,9 +5,10 @@ RUN yum -y install python python-pip python-devel git gcc libjpeg-turbo-devel \
                    libxml2-devel libxslt-devel mysql-devel mysql npm
 RUN yum -y clean all
 RUN npm install -g bower
+RUN pip install --upgrade pip
 
 COPY ./requirements/ /tmp/requirements/
-RUN pip install -r /tmp/requirements/docker.txt
+RUN pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements/docker.txt
 
 WORKDIR /app
 COPY . /app

@@ -14,12 +14,15 @@ DJANGO_APPS = (
     'django.contrib.admin',
 )
 THIRD_PARTY_APPS = (
+    'avatar',
     'rest_framework',
+    'rest_framework.authtoken',
     'allauth',
     'allauth.account',
     'crispy_forms',
     'compressor',
     'djangobower',
+    'csp',
 )
 LOCAL_APPS = (
     'db.base',
@@ -38,6 +41,7 @@ MIDDLEWARE_CLASSES = (
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'csp.middleware.CSPMiddleware',
 )
 
 # Email
@@ -57,6 +61,7 @@ CACHES = {
         'LOCATION': 'unique-snowflake'
     }
 }
+CACHE_TTL = int(getenv('CACHE_TTL', 300))
 
 # Internationalization
 TIME_ZONE = 'UTC'
@@ -180,6 +185,9 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly',
     ),
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework.authentication.TokenAuthentication',
+    ),
     'DEFAULT_FILTER_BACKENDS': (
         'rest_framework.filters.DjangoFilterBackend',
     )
@@ -187,6 +195,19 @@ REST_FRAMEWORK = {
 
 # Security
 SECRET_KEY = getenv('SECRET_KEY', 'changeme')
+CSP_DEFAULT_SRC = (
+    "'self'",
+    'https://*.mapbox.com',
+)
+CSP_SCRIPT_SRC = (
+    "'self'",
+    'https://*.google-analytics.com',
+)
+CSP_IMG_SRC = (
+    "'self'",
+    'https://*.gravatar.com',
+    'https://*.mapbox.com',
+)
 
 # Database
 DATABASE_URL = getenv('DATABASE_URL', 'sqlite:///db.sqlite3')
