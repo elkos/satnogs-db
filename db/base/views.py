@@ -1,5 +1,7 @@
+import ephem
 import logging
 import requests
+from datetime import datetime
 
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.models import User
@@ -12,7 +14,7 @@ from django.conf import settings
 from django.contrib.sites.shortcuts import get_current_site
 from django.template.loader import render_to_string
 from django.views.decorators.cache import cache_page
-from django.db.models import Count
+from django.db.models import Count, Max
 
 from db.base.models import Mode, Transmitter, Satellite, Suggestion, DemodData
 from db.base.forms import SuggestionForm
@@ -52,11 +54,43 @@ def robots(request):
     return response
 
 
+def satellite_position(request, sat_id):
+    sat = get_object_or_404(Satellite, norad_cat_id=sat_id)
+    try:
+        satellite = ephem.readtle(
+            str(sat.name),
+            str(sat.tle1),
+            str(sat.tle2)
+        )
+    except:
+        data = {}
+    else:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        satellite.compute(now)
+        data = {
+            'lon': '{0}'.format(satellite.sublong),
+            'lat': '{0}'.format(satellite.sublat)
+        }
+    return JsonResponse(data, safe=False)
+
+
 def satellite(request, norad):
     """View to render home page."""
-    satellite = get_object_or_404(Satellite, norad_cat_id=norad)
+    satellite_query = Satellite.objects \
+                               .annotate(latest_payload_time=Max('telemetry_data__timestamp'),
+                                         payload_frames_count=Count('telemetry_data'))
+    satellite = get_object_or_404(satellite_query, norad_cat_id=norad)
     suggestions = Suggestion.objects.filter(satellite=satellite)
     modes = Mode.objects.all()
+    telemetry_data_empty = DemodData.objects.filter(satellite__norad_cat_id=norad,
+                                                    payload_decoded__exact='').count()
+    telemetry_data_count = satellite.payload_frames_count - telemetry_data_empty
+
+    try:
+        latest_frame = DemodData.objects.get(satellite=satellite,
+                                             timestamp=satellite.latest_payload_time)
+    except:
+        latest_frame = ''
 
     url = '{0}{1}'.format(settings.SATELLITE_POSITION_ENDPOINT, norad)
 
@@ -66,7 +100,10 @@ def satellite(request, norad):
         sat_position = ''
 
     return render(request, 'base/satellite.html', {'satellite': satellite,
-                                                   'suggestions': suggestions, 'modes': modes,
+                                                   'suggestions': suggestions,
+                                                   'modes': modes,
+                                                   'latest_frame': latest_frame,
+                                                   'telemetry_data_count': telemetry_data_count,
                                                    'sat_position': sat_position,
                                                    'mapbox_id': settings.MAPBOX_MAP_ID,
                                                    'mapbox_token': settings.MAPBOX_TOKEN})
@@ -135,11 +172,13 @@ def stats(request):
     """View to render stats page."""
     satellites = Satellite.objects \
                           .values('name', 'norad_cat_id') \
-                          .annotate(count=Count('telemetry_data')) \
+                          .annotate(count=Count('telemetry_data'),
+                                    latest_payload=Max('telemetry_data__timestamp')) \
                           .order_by('-count')
     observers = DemodData.objects \
                          .values('observer') \
-                         .annotate(count=Count('observer')) \
+                         .annotate(count=Count('observer'),
+                                   latest_payload=Max('timestamp')) \
                          .order_by('-count')
     return render(request, 'base/stats.html', {'satellites': satellites,
                                                'observers': observers})
@@ -154,6 +193,7 @@ def statistics(request):
 
     total_satellites = satellites.count()
     total_transmitters = transmitters.count()
+    total_data = DemodData.objects.all().count()
     alive_transmitters = transmitters.filter(alive=True).count()
     alive_transmitters_percentage = '{0}%'.format(round((float(alive_transmitters) /
                                                          float(total_transmitters)) * 100, 2))
@@ -232,6 +272,7 @@ def statistics(request):
 
     statistics = {
         'total_satellites': total_satellites,
+        'total_data': total_data,
         'transmitters': total_transmitters,
         'transmitters_alive': alive_transmitters_percentage,
         'mode_label': mode_label_sorted,
