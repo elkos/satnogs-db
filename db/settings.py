@@ -1,7 +1,12 @@
-from os import path, getenv
-import dj_database_url
+from os import getenv
+from dj_database_url import parse as db_url
+from unipath import Path
 
-BASE_DIR = path.dirname(path.dirname(__file__))
+
+ROOT = Path(__file__).parent.parent
+
+ENVIRONMENT = getenv('ENVIRONMENT', 'production')
+DEBUG = getenv('DEBUG', False)
 
 # Apps
 DJANGO_APPS = (
@@ -22,12 +27,11 @@ THIRD_PARTY_APPS = (
     'crispy_forms',
     'compressor',
     'csp',
+    'opbeat.contrib.django',
 )
 LOCAL_APPS = (
     'db.base',
     'db.api',
-)
-BOWER_INSTALLED_APPS = (
 )
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -41,23 +45,37 @@ MIDDLEWARE_CLASSES = (
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'csp.middleware.CSPMiddleware',
+    'opbeat.contrib.django.middleware.OpbeatAPMMiddleware',
+    'opbeat.contrib.django.middleware.Opbeat404CatchMiddleware',
 )
 
 # Email
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+if DEBUG:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'localhost'
+EMAIL_PORT = 25
+EMAIL_TIMEOUT = 300
+DEFAULT_FROM_EMAIL = getenv('DEFAULT_FROM_EMAIL', 'noreply@satnogs.org')
 ADMINS = (
     (
-        getenv('ADMINS_FROM_NAME', 'ADMINS'),
-        getenv('ADMINS_FROM_EMAIL', 'noreply@example.com')
+        getenv('ADMINS_FROM_NAME', 'SatNOGS Admins'),
+        getenv('ADMINS_FROM_EMAIL', DEFAULT_FROM_EMAIL)
     ),
 )
 MANAGERS = ADMINS
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 # Cache
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake'
+        'BACKEND': getenv('CACHE_BACKEND', 'django.core.cache.backends.locmem.LocMemCache'),
+        'LOCATION': getenv('CACHE_LOCATION', 'unique-snowflake'),
+        'OPTIONS': {
+            'CLIENT_CLASS': getenv('CACHE_CLIENT_CLASS', None),
+        },
+        'KEY_PREFIX': 'db-{0}'.format(ENVIRONMENT),
     }
 }
 CACHE_TTL = int(getenv('CACHE_TTL', 300))
@@ -74,7 +92,9 @@ USE_TZ = True
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [path.join(BASE_DIR, 'templates')],
+        'DIRS': [
+            Path('db/templates').resolve(),
+        ],
         'OPTIONS': {
             'debug': False,
             'context_processors': [
@@ -99,17 +119,17 @@ TEMPLATES = [
 ]
 
 # Static & Media
-STATIC_ROOT = path.join(path.dirname(BASE_DIR), 'staticfiles')
+STATIC_ROOT = Path('staticfiles').resolve()
 STATIC_URL = '/static/'
-STATICFILES_DIRS = (
-    path.join(BASE_DIR, 'static'),
-)
+STATICFILES_DIRS = [
+    Path('db/static').resolve(),
+]
 STATICFILES_FINDERS = (
     'django.contrib.staticfiles.finders.FileSystemFinder',
     'django.contrib.staticfiles.finders.AppDirectoriesFinder',
     'compressor.finders.CompressorFinder',
 )
-MEDIA_ROOT = path.join(path.dirname(BASE_DIR), 'media')
+MEDIA_ROOT = Path('media').resolve()
 MEDIA_URL = '/media/'
 CRISPY_TEMPLATE_PACK = 'bootstrap3'
 SATELLITE_DEFAULT_IMAGE = '/static/img/sat.png'
@@ -117,6 +137,7 @@ SATELLITE_DEFAULT_IMAGE = '/static/img/sat.png'
 # App conf
 ROOT_URLCONF = 'db.urls'
 WSGI_APPLICATION = 'db.wsgi.application'
+SITE_URL = getenv('SITE_URL', 'https://db.satnogs.org/')
 
 # Auth
 AUTHENTICATION_BACKENDS = (
@@ -187,6 +208,9 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_SEND_TASK_ERROR_EMAILS = True
 CELERY_TASK_ALWAYS_EAGER = True
+CELERY_DEFAULT_QUEUE = 'db-{0}-queue'.format(ENVIRONMENT)
+CELERY_BROKER_URL = getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
+CELERY_RESULT_BACKEND = getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
 
 # API
 REST_FRAMEWORK = {
@@ -210,6 +234,7 @@ CSP_DEFAULT_SRC = (
 CSP_SCRIPT_SRC = (
     "'self'",
     'https://*.google-analytics.com',
+    "'unsafe-eval'",
 )
 CSP_IMG_SRC = (
     "'self'",
@@ -217,10 +242,17 @@ CSP_IMG_SRC = (
     'https://*.mapbox.com',
     'https://*.google-analytics.com',
 )
+SECURE_HSTS_SECONDS = getenv('SECURE_HSTS_SECONDS', 31536000)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+ALLOWED_HOSTS = [
+    getenv('ALLOWED_HOSTS', '*')
+]
 
 # Database
 DATABASE_URL = getenv('DATABASE_URL', 'sqlite:///db.sqlite3')
-DATABASES = {'default': dj_database_url.parse(DATABASE_URL)}
+DATABASES = {'default': db_url(DATABASE_URL)}
 
 # NETWORK API
 NETWORK_API_ENDPOINT = getenv('NETWORK_API_ENDPOINT', 'https://network.satnogs.org/api/')
@@ -232,3 +264,10 @@ SATELLITE_POSITION_ENDPOINT = getenv('SATELLITE_POSITION_ENDPOINT',
 MAPBOX_GEOCODE_URL = 'https://api.tiles.mapbox.com/v4/geocode/mapbox.places/'
 MAPBOX_MAP_ID = getenv('MAPBOX_MAP_ID', '')
 MAPBOX_TOKEN = getenv('MAPBOX_TOKEN', '')
+
+# Metrics
+OPBEAT = {
+    'ORGANIZATION_ID': getenv('OPBEAT_ORGID', None),
+    'APP_ID': getenv('OPBEAT_APPID', None),
+    'SECRET_TOKEN': getenv('OPBEAT_SECRET', None),
+}

@@ -1,3 +1,5 @@
+import json
+from markdown import markdown
 from os import path
 from shortuuidfield import ShortUUIDField
 from uuid import uuid4
@@ -11,6 +13,7 @@ from django.conf import settings
 from db.base.helpers import gridsquare
 
 DATA_SOURCES = ['manual', 'network', 'sids']
+SATELLITE_STATUS = ['alive', 'dead', 're-entered']
 
 
 def _name_payload_frame(instance, filename):
@@ -54,13 +57,19 @@ class Satellite(models.Model):
     norad_cat_id = models.PositiveIntegerField()
     name = models.CharField(max_length=45)
     names = models.TextField(blank=True)
+    description = models.TextField(blank=True)
     image = models.ImageField(upload_to='satellites', blank=True,
                               help_text='Ideally: 250x250')
     tle1 = models.CharField(max_length=200, blank=True)
     tle2 = models.CharField(max_length=200, blank=True)
+    status = models.CharField(choices=zip(SATELLITE_STATUS, SATELLITE_STATUS),
+                              max_length=10, default='alive')
 
     class Meta:
         ordering = ['norad_cat_id']
+
+    def get_description(self):
+        return markdown(self.description)
 
     def get_image(self):
         if self.image and hasattr(self.image, 'url'):
@@ -175,6 +184,12 @@ class DemodData(models.Model):
 
     def __unicode__(self):
         return 'data-for-{0}'.format(self.satellite.norad_cat_id)
+
+    def display_decoded(self):
+        try:
+            json.dumps(self.payload_decoded)
+        except:
+            '{}'
 
     def display_frame(self):
         with open(self.payload_frame.path) as fp:

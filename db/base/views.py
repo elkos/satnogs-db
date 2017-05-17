@@ -14,11 +14,11 @@ from django.http import HttpResponseNotFound, HttpResponseServerError, HttpRespo
 from django.shortcuts import render, redirect, get_object_or_404
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
-from django.views.decorators.cache import cache_page
 
 from db.base.models import Mode, Transmitter, Satellite, Suggestion, DemodData
 from db.base.forms import SuggestionForm
-from db.base.helpers import get_apikey
+from db.base.helpers import get_apikey, cache_for
+from db.base.tasks import export_frames
 
 
 logger = logging.getLogger('db')
@@ -30,9 +30,11 @@ def home(request):
     transmitters = Transmitter.objects.all().count()
     suggestions = Suggestion.objects.all().count()
     contributors = User.objects.filter(is_active=1).count()
+    payloads = DemodData.objects.all().count()
     return render(request, 'base/home.html', {'satellites': satellites,
                                               'transmitters': transmitters,
                                               'contributors': contributors,
+                                              'payloads': payloads,
                                               'suggestions': suggestions})
 
 
@@ -74,7 +76,7 @@ def satellite_position(request, sat_id):
 
 
 def satellite(request, norad):
-    """View to render home page."""
+    """View to render satellite page."""
     satellite_query = Satellite.objects \
                                .annotate(latest_payload_time=Max('telemetry_data__timestamp'),
                                          payload_frames_count=Count('telemetry_data'))
@@ -109,6 +111,15 @@ def satellite(request, norad):
 
 
 @login_required
+def request_export(request, norad):
+    """View to request frames export download."""
+    export_frames.delay(norad, request.user.email, request.user.pk)
+    messages.success(request, ('Your download request was received. '
+                               'You will get an email when it\'s ready'))
+    return redirect(reverse('satellite', kwargs={'norad': norad}))
+
+
+@login_required
 @require_POST
 def suggestion(request):
     """View to process suggestion form"""
@@ -129,8 +140,7 @@ def suggestion(request):
         )
         data = {
             'satname': suggestion.satellite.name,
-            'saturl': saturl,
-            'site_name': site.name
+            'saturl': saturl
         }
         message = render_to_string(template, {'data': data})
         for user in admins:
@@ -183,8 +193,8 @@ def stats(request):
                                                'observers': observers})
 
 
-@cache_page(settings.CACHE_TTL)
-def statistics(request):
+@cache_for(settings.CACHE_TTL)
+def _calculate_statistics():
     """View to create statistics endpoint."""
     satellites = Satellite.objects.all()
     transmitters = Transmitter.objects.all()
@@ -279,6 +289,11 @@ def statistics(request):
         'band_label': band_label_sorted,
         'band_data': band_data_sorted
     }
+    return statistics
+
+
+def statistics(request):
+    statistics = _calculate_statistics()
     return JsonResponse(statistics, safe=False)
 
 
